@@ -10,17 +10,18 @@ import requests
 
 from app.core.ssrf import parse_target_url, resolve_public_ip, safe_session
 
-SECURITY_HEADERS = [
-    "content-security-policy",
-    "x-frame-options",
-    "x-content-type-options",
-    "strict-transport-security",
-    "referrer-policy",
-    "permissions-policy",
-    "cross-origin-embedder-policy",
-    "cross-origin-opener-policy",
-    "cross-origin-resource-policy",
-]
+# Cabecera -> severidad si falta. No se evalúa COEP: solo aplica a páginas con aislamiento
+# cross-origin y exigirla rompería sitios que cargan recursos de terceros (fuentes, CDN).
+SECURITY_HEADERS = {
+    "content-security-policy": "medium",
+    "x-frame-options": "medium",
+    "x-content-type-options": "medium",
+    "strict-transport-security": "medium",
+    "referrer-policy": "low",
+    "permissions-policy": "low",
+    "cross-origin-opener-policy": "low",
+    "cross-origin-resource-policy": "low",
+}
 
 COMMON_PATHS = [
     "/.env",
@@ -33,6 +34,19 @@ COMMON_PATHS = [
     "/config.json",
     "/.svn/entries",
 ]
+
+
+def missing_header_findings(present: set[str]) -> list[dict[str, Any]]:
+    return [
+        {
+            "severity": severity,
+            "title": f"Missing security header: {header}",
+            "description": f"The response does not include the {header} header.",
+            "remediation": f"Configure the server to send {header}.",
+        }
+        for header, severity in SECURITY_HEADERS.items()
+        if header not in present
+    ]
 
 
 def check_headers(url: str) -> list[dict[str, Any]]:
@@ -51,17 +65,7 @@ def check_headers(url: str) -> list[dict[str, Any]]:
             )
             return findings
 
-        present = {h.lower() for h in resp.headers.keys()}
-        for header in SECURITY_HEADERS:
-            if header not in present:
-                findings.append(
-                    {
-                        "severity": "medium",
-                        "title": f"Missing security header: {header}",
-                        "description": f"The response does not include the {header} header.",
-                        "remediation": f"Configure the server to send {header}.",
-                    }
-                )
+        findings.extend(missing_header_findings({h.lower() for h in resp.headers.keys()}))
 
         set_cookie = resp.headers.get("set-cookie", "")
         if set_cookie:

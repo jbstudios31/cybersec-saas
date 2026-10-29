@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body { font-family: 'Inter', sans-serif; }
+.severity-critical { border-left-color: #dc2626; }
+.severity-high { border-left-color: #ea580c; }
+.severity-medium { border-left-color: #d97706; }
+.severity-low { border-left-color: #65a30d; }
+.badge-critical { background-color: #fee2e2; color: #991b1b; }
+.badge-high { background-color: #fed7aa; color: #9c4221; }
+.badge-medium { background-color: #fef3c7; color: #713f12; }
+.badge-low { background-color: #dcfce7; color: #166534; }

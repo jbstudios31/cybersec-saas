@@ -5,6 +5,7 @@ import uuid
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -27,6 +28,7 @@ from app.core.security import (
     validate_password_strength,
     verify_password,
 )
+from app.core.security_headers import apply_security_headers
 from app.core.ssrf import UnsafeTargetError, validate_target_url
 from app.core.verification import (
     check_domain_ownership,
@@ -85,12 +87,8 @@ async def request_context_middleware(request: Request, call_next):
         raise
     duration_ms = (time.perf_counter() - started) * 1000
     response.headers["X-Request-ID"] = rid
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["X-Response-Time-ms"] = f"{duration_ms:.1f}"
-    if config.IS_PRODUCTION:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    apply_security_headers(response, request.url.path, hsts=config.IS_PRODUCTION)
     logger.info(
         "request",
         extra={"method": request.method, "path": request.url.path, "status": response.status_code, "duration_ms": round(duration_ms, 1)},
@@ -139,6 +137,7 @@ if _admin_email and _admin_password:
             _db.close()
 
 templates = Jinja2Templates(directory="app/templates")
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 def flash(request: Request, category: str, message: str):
