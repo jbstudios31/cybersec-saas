@@ -27,7 +27,13 @@ from app.core.security import (
     validate_password_strength,
     verify_password,
 )
-from app.core.ssrf import validate_target_url
+from app.core.ssrf import UnsafeTargetError, validate_target_url
+from app.core.verification import (
+    check_domain_ownership,
+    mark_verified,
+    new_verification_token,
+    verification_instructions,
+)
 from app.models.base import Base
 from app.models.target import Target
 from app.models.user import User
@@ -270,7 +276,7 @@ def dashboard(request: Request, db: DbSession):
     return templates.TemplateResponse("index.html", ctx)
 
 
-@app.get("/targets/{target_id}", response_class=HTMLResponse)
+@app.get("/targets/{target_id}/view", response_class=HTMLResponse)
 def target_detail(request: Request, target_id: int, db: DbSession):
     user = get_current_user_html(request)
     redirect = require_auth_html(request, user)
@@ -284,14 +290,74 @@ def target_detail(request: Request, target_id: int, db: DbSession):
         return HTMLResponse("No tienes acceso a este target", status_code=403)
 
     ctx = common_context(request)
-    ctx.update({"target": target, "user": user})
+    instructions = None
+    if target.verified_at is None and target.verification_token:
+        try:
+            instructions = verification_instructions(target.url, target.verification_token)
+        except UnsafeTargetError:
+            instructions = None
+    ctx.update({
+        "target": target,
+        "user": user,
+        "instructions": instructions,
+        "verification_required": config.REQUIRE_TARGET_VERIFICATION,
+    })
     return templates.TemplateResponse("target.html", ctx)
+
+
+def _owned_target_or_error(request: Request, target_id: int, db, csrf_token: str):
+    """Valida CSRF, sesión y propiedad. Devuelve (user, target, respuesta_de_error)."""
+    back = RedirectResponse(url=f"/targets/{target_id}/view", status_code=302)
+    if not validate_csrf_token(request, csrf_token):
+        return None, None, back
+    user = get_current_user_html(request)
+    redirect = require_auth_html(request, user)
+    if redirect:
+        return None, None, redirect
+    target = db.get(Target, target_id)
+    if not target:
+        return None, None, HTMLResponse("Not found", status_code=404)
+    if not user.is_admin and target.owner_id != user.id:
+        return None, None, HTMLResponse("No tienes acceso a este target", status_code=403)
+    return user, target, None
+
+
+@app.post("/targets/{target_id}/verification-html", response_class=HTMLResponse)
+def request_verification_html(request: Request, target_id: int, csrf_token: str = Form(...), db: DbSession = None):
+    _, target, error = _owned_target_or_error(request, target_id, db, csrf_token)
+    if error:
+        return error
+    if target.verified_at is None and not target.verification_token:
+        target.verification_token = new_verification_token()
+        db.commit()
+    return RedirectResponse(url=f"/targets/{target_id}/view", status_code=302)
+
+
+@app.post("/targets/{target_id}/verify-html", response_class=HTMLResponse)
+def verify_target_html(request: Request, target_id: int, csrf_token: str = Form(...), db: DbSession = None):
+    _, target, error = _owned_target_or_error(request, target_id, db, csrf_token)
+    if error:
+        return error
+    if not target.verification_token:
+        flash(request, "error", "Genera primero el token de verificación.")
+    else:
+        try:
+            ok = check_domain_ownership(target.url, target.verification_token)
+        except UnsafeTargetError:
+            ok = False
+        if ok:
+            mark_verified(target)
+            db.commit()
+            flash(request, "success", "Dominio verificado. Ya puedes ejecutar escaneos.")
+        else:
+            flash(request, "error", "No encontramos el token en DNS ni en /.well-known/. Los cambios de DNS pueden tardar.")
+    return RedirectResponse(url=f"/targets/{target_id}/view", status_code=302)
 
 
 @app.post("/targets/{target_id}/scan-html", response_class=HTMLResponse)
 def trigger_scan_html(request: Request, target_id: int, csrf_token: str = Form(...), db: DbSession = None):
     if not validate_csrf_token(request, csrf_token):
-        return RedirectResponse(url=f"/targets/{target_id}", status_code=302)
+        return RedirectResponse(url=f"/targets/{target_id}/view", status_code=302)
     user = get_current_user_html(request)
     redirect = require_auth_html(request, user)
     if redirect:
@@ -310,7 +376,7 @@ def trigger_scan_html(request: Request, target_id: int, csrf_token: str = Form(.
 
     if config.REQUIRE_TARGET_VERIFICATION and target.verified_at is None:
         flash(request, "error", "Verifica la propiedad del dominio antes de escanear.")
-        return RedirectResponse(url=f"/targets/{target_id}", status_code=302)
+        return RedirectResponse(url=f"/targets/{target_id}/view", status_code=302)
 
     enqueued = False
     if config.SCAN_ASYNC:
@@ -322,14 +388,14 @@ def trigger_scan_html(request: Request, target_id: int, csrf_token: str = Form(.
 
     if enqueued:
         flash(request, "success", "Escaneo en cola; los resultados aparecerán al finalizar.")
-        return RedirectResponse(url=f"/targets/{target_id}", status_code=302)
+        return RedirectResponse(url=f"/targets/{target_id}/view", status_code=302)
 
     result = execute_scan(target_id)
     if "error" in result:
         flash(request, "error", f"Error al ejecutar el escaneo: {result['error']}")
     else:
         flash(request, "success", f"Escaneo completado: {result.get('findings', 0)} hallazgo(s) encontrado(s)")
-    return RedirectResponse(url=f"/targets/{target_id}", status_code=302)
+    return RedirectResponse(url=f"/targets/{target_id}/view", status_code=302)
 
 
 # ---- HTML: administrador panel ----

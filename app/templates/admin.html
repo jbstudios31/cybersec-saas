@@ -98,7 +98,7 @@
               <span class="px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-700">{{ 'Activo' if t.is_active else 'Inactivo' }}</span>
             </td>
             <td class="px-4 py-3 text-right">
-              <a href="/targets/{{ t.id }}" class="text-blue-600 hover:underline text-sm font-medium">Ver panel</a>
+              <a href="/targets/{{ t.id }}/view" class="text-blue-600 hover:underline text-sm font-medium">Ver panel</a>
             </td>
           </tr>
           {% else %}

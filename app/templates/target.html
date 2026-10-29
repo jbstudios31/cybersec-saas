@@ -41,6 +41,44 @@
     </div>
   </div>
   {% else %}
+  {% if verification_required and not target.verified_at %}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-5 space-y-4">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-900">Verifica que eres dueño del dominio</h2>
+      <p class="text-sm text-gray-500">Por seguridad solo escaneamos dominios cuya propiedad se haya comprobado. Elige una de las dos opciones.</p>
+    </div>
+    {% if not target.verification_token %}
+    <form method="post" action="/targets/{{ target.id }}/verification-html">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
+      <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Generar token de verificación</button>
+    </form>
+    {% elif instructions %}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+      <div class="border border-gray-200 rounded-lg p-3">
+        <p class="font-medium text-gray-800 mb-2">Opción 1: registro DNS TXT</p>
+        <p class="text-gray-500">Nombre:</p>
+        <code class="block bg-gray-100 rounded px-2 py-1 break-all mb-2">{{ instructions.dns.name }}</code>
+        <p class="text-gray-500">Valor:</p>
+        <code class="block bg-gray-100 rounded px-2 py-1 break-all">{{ instructions.dns.value }}</code>
+      </div>
+      <div class="border border-gray-200 rounded-lg p-3">
+        <p class="font-medium text-gray-800 mb-2">Opción 2: archivo en tu sitio</p>
+        <p class="text-gray-500">Publica esta URL:</p>
+        <code class="block bg-gray-100 rounded px-2 py-1 break-all mb-2">{{ instructions.http.url }}</code>
+        <p class="text-gray-500">Con exactamente este contenido:</p>
+        <code class="block bg-gray-100 rounded px-2 py-1 break-all">{{ instructions.http.content }}</code>
+      </div>
+    </div>
+    <form method="post" action="/targets/{{ target.id }}/verify-html">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
+      <button class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Verificar ahora</button>
+    </form>
+    {% endif %}
+  </div>
+  {% elif verification_required and target.verified_at %}
+  <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">Dominio verificado</div>
+  {% endif %}
+
   <!-- Hallazgos -->
   <div>
     {% if target.scans %}

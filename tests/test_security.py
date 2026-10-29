@@ -154,3 +154,43 @@ def test_report_filename_is_safe():
     resp = client.get(f"/targets/{tid}/report")
     assert resp.status_code == 200
     assert resp.headers["content-disposition"] == f'attachment; filename="reporte-target-{tid}.pdf"'
+
+
+# ---- UI HTML de verificación ----
+
+def _csrf(client, tid):
+    page = client.get(f"/targets/{tid}/view")
+    return re.search(r'name="csrf_token" value="([^"]+)"', page.text).group(1)
+
+
+def test_html_verification_flow(monkeypatch):
+    monkeypatch.setattr(config, "REQUIRE_TARGET_VERIFICATION", True)
+    tid = _create_target()
+    client = login("cliente@test.local", "cliente123")
+
+    page = client.get(f"/targets/{tid}/view")
+    assert "Generar token de verificación" in page.text
+
+    client.post(f"/targets/{tid}/verification-html", data={"csrf_token": _csrf(client, tid)}, follow_redirects=False)
+    page = client.get(f"/targets/{tid}/view")
+    assert "_cybersec-verify.example.com" in page.text
+    assert "Verificar ahora" in page.text
+
+    monkeypatch.setattr("app.main.check_domain_ownership", lambda url, tok: True)
+    client.post(f"/targets/{tid}/verify-html", data={"csrf_token": _csrf(client, tid)}, follow_redirects=False)
+    assert "Dominio verificado" in client.get(f"/targets/{tid}/view").text
+
+
+def test_html_verification_rejects_bad_csrf_and_other_user():
+    tid = _create_target(owner_id=1)  # target del admin
+    client = login("cliente@test.local", "cliente123")
+    token = re.search(r'name="csrf_token" value="([^"]+)"', client.get("/").text).group(1)
+    assert client.post(f"/targets/{tid}/verify-html", data={"csrf_token": token}, follow_redirects=False).status_code == 403
+    assert client.post(f"/targets/{tid}/verify-html", data={"csrf_token": "malo"}, follow_redirects=False).status_code == 302
+
+
+def test_target_html_page_is_reachable_and_api_returns_json():
+    tid = _create_target()
+    client = login("cliente@test.local", "cliente123")
+    assert "text/html" in client.get(f"/targets/{tid}/view").headers["content-type"]
+    assert client.get(f"/targets/{tid}").headers["content-type"] == "application/json"

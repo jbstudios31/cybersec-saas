@@ -240,7 +240,7 @@ def test_target_detail_cliente_cannot_see_others():
     db.close()
 
     client = client_logged_in("cliente@test.local", "cliente123")
-    resp = client.get(f"/targets/{target_id}")
+    resp = client.get(f"/targets/{target_id}/view")
     assert resp.status_code == 403
 
 
