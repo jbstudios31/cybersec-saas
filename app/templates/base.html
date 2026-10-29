@@ -2,8 +2,10 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="color-scheme" content="light">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f4f3">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1e2a28">
   <title>{% block title %}Cybersec SaaS{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css">
   <script src="/static/app.js" defer></script>
@@ -12,24 +14,41 @@
   <a class="skip-link" href="#contenido">Saltar al contenido</a>
   {% if user %}
   <div class="shell">
-    <header class="rail">
+    <header class="rail" id="app-rail">
+      <button class="menu-toggle" id="menu-toggle" type="button" aria-expanded="false" aria-controls="rail-extra" aria-label="Abrir menú de navegación">
+        <span class="menu-line"></span>
+        <span class="menu-line"></span>
+        <span class="menu-line"></span>
+      </button>
       <a class="brand" href="/">Cybersec</a>
-      <nav class="rail-nav" aria-label="Principal">
-        <a href="/"{% if active_page == 'objetivos' %} aria-current="page"{% endif %}>Objetivos</a>
-        {% if user.is_admin %}<a href="/admin"{% if active_page == 'admin' %} aria-current="page"{% endif %}>Administración</a>{% endif %}
-      </nav>
-      <div class="account">
-        <span class="account-name">{{ user.email }}</span>
-        <span>{{ 'Administrador' if user.is_admin else 'Cliente' }}</span>
-        <form method="post" action="/logout">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
-          <button type="submit" class="btn btn-quiet">Cerrar sesión</button>
-        </form>
+      <div class="rail-extra" id="rail-extra">
+        <nav class="rail-nav" aria-label="Principal">
+          <a href="/"{% if active_page == 'objetivos' %} aria-current="page"{% endif %}>Objetivos</a>
+          {% if user.is_admin %}<a href="/admin"{% if active_page == 'admin' %} aria-current="page"{% endif %}>Administración</a>{% endif %}
+        </nav>
+        <div class="account">
+          <span class="account-name">{{ user.email }}</span>
+          <span>{{ 'Administrador' if user.is_admin else 'Cliente' }}</span>
+          <form method="post" action="/logout">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
+            <button type="submit" class="btn btn-quiet">Cerrar sesión</button>
+          </form>
+        </div>
       </div>
     </header>
   {% else %}
   <div class="guest">
-    <header class="guest-bar"><a class="brand" href="/">Cybersec</a></header>
+    <header class="guest-bar">
+      <button class="menu-toggle guest-menu-toggle" id="guest-menu-toggle" type="button" aria-expanded="false" aria-controls="guest-nav" aria-label="Abrir menú de navegación">
+        <span class="menu-line"></span>
+        <span class="menu-line"></span>
+        <span class="menu-line"></span>
+      </button>
+      <a class="brand" href="/">Cybersec</a>
+      <nav class="guest-nav" id="guest-nav" hidden>
+        <a href="/login" class="btn btn-primary">Iniciar sesión</a>
+      </nav>
+    </header>
   {% endif %}
     <main id="contenido" class="{{ 'main' if user else 'guest-main' }}">
       {% include "components/flash.html" %}
