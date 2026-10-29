@@ -1,8 +1,8 @@
 """Cabeceras de seguridad de las respuestas de la propia app.
 
 La CSP es estricta (sin 'unsafe-inline' ni 'unsafe-eval'): el CSS y el JS se sirven desde
-/static (ver scripts/build-css.sh). Solo se permiten las fuentes de Google Fonts.
-No se envía COEP: exigiría que Google Fonts y cualquier recurso externo declaren CORP/CORS.
+/static (ver scripts/build-css.sh). Las fuentes también se sirven desde /static: no hay recursos de terceros.
+No se envía COEP: exigiría que cualquier recurso externo declare CORP/CORS.
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ CONTENT_SECURITY_POLICY = "; ".join(
     [
         "default-src 'self'",
         "script-src 'self'",
-        "style-src 'self' https://fonts.googleapis.com",
-        "font-src https://fonts.gstatic.com",
+        "style-src 'self'",
+        "font-src 'self'",
         "img-src 'self' data:",
         "connect-src 'self'",
         "object-src 'none'",

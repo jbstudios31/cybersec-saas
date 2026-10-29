@@ -1,4 +1,4 @@
-/** Configuración de Tailwind para compilar app/static/app.css (ver scripts/build-css.sh). */
+/** Tailwind solo aporta el reset (preflight) y utilidades puntuales; el diseño vive en frontend/input.css. */
 module.exports = {
   content: ["./app/templates/**/*.html"],
   theme: { extend: {} },

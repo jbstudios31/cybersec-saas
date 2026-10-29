@@ -1,6 +1,8 @@
 import os
 import time
 import uuid
+from datetime import UTC
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -139,6 +141,73 @@ if _admin_email and _admin_password:
 templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
+# ---- Filtros de presentación (todo el texto visible está en español) ----
+_SEVERIDAD = {
+    "critical": ("crítico", "críticos"),
+    "high": ("alto", "altos"),
+    "medium": ("medio", "medios"),
+    "low": ("bajo", "bajos"),
+}
+_ORDEN_SEVERIDAD = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+_ESTADOS_ESCANEO = {"pending": "En cola", "running": "En curso", "done": "Finalizado", "failed": "Fallido"}
+_MESES = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+
+
+def _display_tz():
+    try:
+        return ZoneInfo(config.DISPLAY_TIMEZONE)
+    except Exception:  # noqa: BLE001 - zona inválida o sin tzdata: se muestra en UTC
+        return UTC
+
+
+def filtro_fecha(value) -> str:
+    if not value:
+        return "—"
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    local = value.astimezone(_display_tz())
+    return f"{local.day} {_MESES[local.month - 1]} {local.year}, {local:%H:%M}"
+
+
+def filtro_severidad(value: str, count: int = 1) -> str:
+    singular, plural = _SEVERIDAD.get(value, (value, value))
+    return singular if count == 1 else plural
+
+
+def filtro_estado_escaneo(value: str) -> str:
+    return _ESTADOS_ESCANEO.get(value, value)
+
+
+def filtro_por_severidad(findings):
+    return sorted(findings, key=lambda f: (_ORDEN_SEVERIDAD.get(f.severity, 9), f.id))
+
+
+def filtro_conteo_abiertos(findings) -> dict:
+    """Hallazgos abiertos (ni resueltos ni falsos positivos) por severidad."""
+    counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "total": 0}
+    for f in findings:
+        if f.status in ("resolved", "false_positive"):
+            continue
+        if f.severity in counts:
+            counts[f.severity] += 1
+        counts["total"] += 1
+    return counts
+
+
+templates.env.filters.update(
+    fecha=filtro_fecha,
+    severidad=filtro_severidad,
+    estado_escaneo=filtro_estado_escaneo,
+    por_severidad=filtro_por_severidad,
+    conteo_abiertos=filtro_conteo_abiertos,
+)
+
+
+def error_page(request: Request, status_code: int, title: str, message: str):
+    ctx = common_context(request)
+    ctx.update({"user": get_current_user_html(request), "title": title, "message": message})
+    return templates.TemplateResponse("error.html", ctx, status_code=status_code)
+
 
 def flash(request: Request, category: str, message: str):
     """Guarda un mensaje flash en la sesión para mostrarlo en la próxima respuesta."""
@@ -252,26 +321,32 @@ def dashboard(request: Request, db: DbSession):
         query = query.filter(Target.owner_id == user.id)
     targets = query.all()
 
-    # Estadísticas
-    total_targets = len(targets)
-    critical_findings = 0
+    # Resumen por objetivo: último escaneo y hallazgos abiertos por severidad
+    summaries = {}
     last_scan = None
     for t in targets:
-        for s in t.scans:
-            if s.started_at and (not last_scan or s.started_at > last_scan):
-                last_scan = s.started_at
-            for f in s.findings:
-                if f.severity == "critical":
-                    critical_findings += 1
-
+        scans = sorted(t.scans, key=lambda s: s.id)
+        scan = scans[-1] if scans else None
+        counts = filtro_conteo_abiertos(scan.findings) if scan else filtro_conteo_abiertos([])
+        summaries[t.id] = {"scan": scan, "counts": counts, "total": counts["total"]}
+        for s_ in scans:
+            if s_.started_at and (not last_scan or s_.started_at > last_scan):
+                last_scan = s_.started_at
+    # Primero los objetivos con más hallazgos críticos y altos
+    targets = sorted(
+        targets,
+        key=lambda t: (-summaries[t.id]["counts"]["critical"], -summaries[t.id]["counts"]["high"], t.name.lower()),
+    )
+    critical_findings = sum(summaries[t.id]["counts"]["critical"] for t in targets)
     stats = {
-        "total_targets": total_targets,
+        "total_targets": len(targets),
         "critical_findings": critical_findings,
-        "last_scan": last_scan.strftime("%d/%m/%Y") if last_scan else "—",
+        "last_scan": last_scan,
+        "worst": targets[0] if critical_findings else None,
     }
 
     ctx = common_context(request)
-    ctx.update({"targets": targets, "user": user, "stats": stats})
+    ctx.update({"targets": targets, "user": user, "stats": stats, "summaries": summaries})
     return templates.TemplateResponse("index.html", ctx)
 
 
@@ -284,9 +359,9 @@ def target_detail(request: Request, target_id: int, db: DbSession):
 
     target = db.get(Target, target_id)
     if not target:
-        return HTMLResponse("Not found", status_code=404)
+        return error_page(request, 404, "No encontrado", "El recurso que buscas no existe.")
     if not user.is_admin and target.owner_id != user.id:
-        return HTMLResponse("No tienes acceso a este target", status_code=403)
+        return error_page(request, 403, "Sin acceso", "No tienes acceso a este objetivo.")
 
     ctx = common_context(request)
     instructions = None
@@ -298,6 +373,7 @@ def target_detail(request: Request, target_id: int, db: DbSession):
     ctx.update({
         "target": target,
         "user": user,
+        "scans": sorted(target.scans, key=lambda s: s.id, reverse=True),
         "instructions": instructions,
         "verification_required": config.REQUIRE_TARGET_VERIFICATION,
     })
@@ -315,9 +391,9 @@ def _owned_target_or_error(request: Request, target_id: int, db, csrf_token: str
         return None, None, redirect
     target = db.get(Target, target_id)
     if not target:
-        return None, None, HTMLResponse("Not found", status_code=404)
+        return None, None, error_page(request, 404, "No encontrado", "El recurso que buscas no existe.")
     if not user.is_admin and target.owner_id != user.id:
-        return None, None, HTMLResponse("No tienes acceso a este target", status_code=403)
+        return None, None, error_page(request, 403, "Sin acceso", "No tienes acceso a este objetivo.")
     return user, target, None
 
 
@@ -364,14 +440,14 @@ def trigger_scan_html(request: Request, target_id: int, csrf_token: str = Form(.
 
     target = db.get(Target, target_id)
     if not target:
-        return HTMLResponse("Not found", status_code=404)
+        return error_page(request, 404, "No encontrado", "El recurso que buscas no existe.")
     if not user.is_admin and target.owner_id != user.id:
-        return HTMLResponse("No tienes acceso a este target", status_code=403)
+        return error_page(request, 403, "Sin acceso", "No tienes acceso a este objetivo.")
 
     try:
         validate_target_url(target.url)
     except Exception:
-        return HTMLResponse("URL del target no permitida", status_code=400)
+        return error_page(request, 400, "URL no permitida", "La URL de este objetivo no está permitida para escaneos.")
 
     if config.REQUIRE_TARGET_VERIFICATION and target.verified_at is None:
         flash(request, "error", "Verifica la propiedad del dominio antes de escanear.")
@@ -406,7 +482,7 @@ def admin_dashboard(request: Request, db: DbSession):
     if redirect:
         return redirect
     if not user.is_admin:
-        return HTMLResponse("Solo administradores pueden acceder a este panel", status_code=403)
+        return error_page(request, 403, "Acceso restringido", "Solo los administradores pueden ver este panel.")
 
     users = db.query(User).all()
     targets = db.query(Target).all()
@@ -417,10 +493,9 @@ def admin_dashboard(request: Request, db: DbSession):
 
     total_critical_findings = 0
     for t in targets:
-        for s in t.scans:
-            for f in s.findings:
-                if f.severity == "critical":
-                    total_critical_findings += 1
+        scans = sorted(t.scans, key=lambda s: s.id)
+        if scans:
+            total_critical_findings += filtro_conteo_abiertos(scans[-1].findings)["critical"]
 
     stats = {
         "total_users": total_users,
@@ -430,7 +505,7 @@ def admin_dashboard(request: Request, db: DbSession):
     }
 
     ctx = common_context(request)
-    ctx.update({"users": users, "targets": targets, "user": user, "stats": stats})
+    ctx.update({"users": users, "targets": targets, "user": user, "stats": stats, "owners": {u.id: u.email for u in users}})
     return templates.TemplateResponse("admin.html", ctx)
 
 
@@ -452,7 +527,7 @@ def admin_create_user(
     if redirect:
         return redirect
     if not user or not user.is_admin:
-        return HTMLResponse("Solo administradores", status_code=403)
+        return error_page(request, 403, "Acceso restringido", "Solo los administradores pueden realizar esta acción.")
 
     owned = db is None
     if owned:
@@ -514,7 +589,7 @@ def admin_create_target(
     if redirect:
         return redirect
     if not user or not user.is_admin:
-        return HTMLResponse("Solo administradores", status_code=403)
+        return error_page(request, 403, "Acceso restringido", "Solo los administradores pueden realizar esta acción.")
 
     try:
         validate_target_url(url)

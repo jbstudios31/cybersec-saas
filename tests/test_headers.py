@@ -32,6 +32,8 @@ def test_csp_is_strict():
     assert "'unsafe-inline'" not in csp
     assert "'unsafe-eval'" not in csp
     assert "cdn.tailwindcss.com" not in csp
+    assert "googleapis" not in csp and "gstatic" not in csp
+    assert "style-src 'self';" in csp and "font-src 'self'" in csp
     assert "frame-ancestors 'none'" in csp
     assert "object-src 'none'" in csp
 

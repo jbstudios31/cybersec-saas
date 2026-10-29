@@ -72,3 +72,6 @@ REQUIRE_TARGET_VERIFICATION = _bool("REQUIRE_TARGET_VERIFICATION", IS_PRODUCTION
 ALLOWED_TARGET_PORTS = {
     int(p) for p in os.getenv("ALLOWED_TARGET_PORTS", "80,443,8080,8443").split(",") if p.strip()
 }
+
+# Zona horaria para mostrar fechas en la interfaz
+DISPLAY_TIMEZONE = os.getenv("DISPLAY_TIMEZONE", "America/Santo_Domingo")
