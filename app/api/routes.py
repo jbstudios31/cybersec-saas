@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from app.api.deps import DbSession, get_current_user
@@ -26,7 +26,14 @@ from app.core.security import (
     validate_password_strength,
     verify_password,
 )
-from app.core.ssrf import validate_target_url
+from app.core.ssrf import UnsafeTargetError, validate_target_url
+from app.core.verification import (
+    check_domain_ownership,
+    ensure_verified,
+    mark_verified,
+    new_verification_token,
+    verification_instructions,
+)
 from app.models.finding import Finding
 from app.models.scan_run import ScanRun
 from app.models.target import Target
@@ -123,8 +130,8 @@ def create_target(payload: TargetCreate, db: DbSession, current_user: User = Dep
 def list_targets(
     db: DbSession,
     current_user: User = Depends(get_current_user),
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1, le=10_000),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     query = db.query(Target)
     if not current_user.is_admin:
@@ -160,8 +167,8 @@ def list_findings(
     scan_id: int,
     db: DbSession,
     current_user: User = Depends(get_current_user),
-    page: int = 1,
-    page_size: int = 20,
+    page: int = Query(1, ge=1, le=10_000),
+    page_size: int = Query(20, ge=1, le=100),
 ):
     scan = db.get(ScanRun, scan_id)
     if not scan:
@@ -242,7 +249,7 @@ def download_report(target_id: int, db: DbSession, current_user: User = Depends(
     return StreamingResponse(
         iter([pdf]),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="reporte-{target.name.replace(" ", "-").replace(chr(34), "")}.pdf"'},
+        headers={"Content-Disposition": f'attachment; filename="reporte-target-{target.id}.pdf"'},
     )
 
 
@@ -254,6 +261,7 @@ def trigger_scan(target_id: int, db: DbSession, current_user: User = Depends(get
     if not current_user.is_admin and target.owner_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes acceso a este target")
     validate_target_url(target.url)
+    ensure_verified(target)
 
     if config.SCAN_ASYNC:
         try:
@@ -264,3 +272,40 @@ def trigger_scan(target_id: int, db: DbSession, current_user: User = Depends(get
 
     result = execute_scan(target_id)
     return {"accepted": True, "target_id": target_id, "scan": result}
+
+
+@router.post("/targets/{target_id}/verification")
+def request_verification(target_id: int, db: DbSession, current_user: User = Depends(get_current_user)):
+    """Genera (o reutiliza) el token de verificación de propiedad del dominio."""
+    target = db.get(Target, target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="target not found")
+    if not current_user.is_admin and target.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes acceso a este target")
+    if target.verified_at is None and not target.verification_token:
+        target.verification_token = new_verification_token()
+        db.commit()
+    return {
+        "verified": target.verified_at is not None,
+        "instructions": verification_instructions(target.url, target.verification_token or ""),
+    }
+
+
+@router.post("/targets/{target_id}/verify")
+def verify_target(target_id: int, db: DbSession, current_user: User = Depends(get_current_user)):
+    target = db.get(Target, target_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="target not found")
+    if not current_user.is_admin and target.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes acceso a este target")
+    if not target.verification_token:
+        raise HTTPException(status_code=400, detail="Solicita primero un token de verificación")
+    try:
+        ok = check_domain_ownership(target.url, target.verification_token)
+    except UnsafeTargetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not ok:
+        raise HTTPException(status_code=400, detail="No se encontró el token en DNS ni en /.well-known/")
+    mark_verified(target)
+    db.commit()
+    return {"verified": True}

@@ -56,6 +56,7 @@ class TargetOut(ORMModel):
     url: str
     owner_id: int
     is_active: bool
+    verified_at: datetime | None = None
 
 
 class TargetList(ORMModel):

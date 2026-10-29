@@ -1,5 +1,6 @@
 from celery import shared_task
 
+from app.core import config
 from app.core.database import SessionLocal, engine
 from app.core.ssrf import validate_target_url
 from app.models.base import Base
@@ -17,6 +18,8 @@ def scan_all_targets() -> dict:
         targets = db.query(Target).filter(Target.is_active == True).all()  # noqa: E712
         results = []
         for target in targets:
+            if config.REQUIRE_TARGET_VERIFICATION and target.verified_at is None:
+                continue
             try:
                 validate_target_url(target.url)
             except Exception:

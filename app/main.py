@@ -308,6 +308,10 @@ def trigger_scan_html(request: Request, target_id: int, csrf_token: str = Form(.
     except Exception:
         return HTMLResponse("URL del target no permitida", status_code=400)
 
+    if config.REQUIRE_TARGET_VERIFICATION and target.verified_at is None:
+        flash(request, "error", "Verifica la propiedad del dominio antes de escanear.")
+        return RedirectResponse(url=f"/targets/{target_id}", status_code=302)
+
     enqueued = False
     if config.SCAN_ASYNC:
         try:

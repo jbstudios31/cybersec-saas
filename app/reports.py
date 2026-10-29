@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from io import BytesIO
 
 from reportlab.lib import colors
@@ -47,7 +47,7 @@ def build_pdf_report(target_name: str, target_url: str, owner_id: int, findings:
     story.append(Paragraph(f"<b>URL:</b> {target_url}", body_style))
     story.append(Paragraph(f"<b>Propietario ID:</b> {owner_id}", body_style))
     story.append(Paragraph(
-        f"<b>Fecha del reporte:</b> {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}",
+        f"<b>Fecha del reporte:</b> {datetime.now(UTC).strftime('%d/%m/%Y %H:%M UTC')}",
         body_style,
     ))
     story.append(Spacer(1, 0.6 * cm))

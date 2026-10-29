@@ -12,3 +12,4 @@ itsdangerous==2.2.0
 python-jose==3.3.0
 reportlab==4.2.2
 prometheus-fastapi-instrumentator==7.0.0
+dnspython==2.7.0

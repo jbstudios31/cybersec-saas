@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
+from app.core import config
 from app.core.database import SessionLocal, engine
 from app.core.ssrf import validate_target_url
 from app.models.base import Base
@@ -30,6 +31,8 @@ def execute_scan(target_id: int) -> dict:
             validate_target_url(target.url)
         except Exception as exc:  # noqa: BLE001
             return {"error": getattr(exc, "detail", str(exc))}
+        if config.REQUIRE_TARGET_VERIFICATION and target.verified_at is None:
+            return {"error": "target not verified"}
         scan = ScanRun(target_id=target.id, status="running")
         db.add(scan)
         db.commit()
@@ -38,7 +41,7 @@ def execute_scan(target_id: int) -> dict:
         try:
             findings_data = scan_target(target.url)
             scan.status = "done"
-            scan.finished_at = datetime.now(timezone.utc)
+            scan.finished_at = datetime.now(UTC)
             db.add(scan)
             db.commit()
 
@@ -62,7 +65,7 @@ def execute_scan(target_id: int) -> dict:
             return {"scan_id": scan.id, "findings": len(findings_data)}
         except Exception:  # noqa: BLE001
             scan.status = "failed"
-            scan.finished_at = datetime.now(timezone.utc)
+            scan.finished_at = datetime.now(UTC)
             db.add(scan)
             db.commit()
             return {"error": "scan failed"}

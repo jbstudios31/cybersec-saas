@@ -64,3 +64,11 @@ SMTP_PASS = os.getenv("SMTP_PASS") or None
 SMTP_USE_TLS = _bool("SMTP_USE_TLS", False)
 ALERT_EMAIL = os.getenv("ALERT_EMAIL", "alerts@localhost")
 ALERT_FROM_EMAIL = os.getenv("ALERT_FROM_EMAIL", ALERT_EMAIL)
+
+# Verificación de propiedad del dominio antes de escanear (activa solo en producción)
+REQUIRE_TARGET_VERIFICATION = _bool("REQUIRE_TARGET_VERIFICATION", IS_PRODUCTION)
+
+# Puertos permitidos para los objetivos (anti-escaneo de servicios internos)
+ALLOWED_TARGET_PORTS = {
+    int(p) for p in os.getenv("ALLOWED_TARGET_PORTS", "80,443,8080,8443").split(",") if p.strip()
+}

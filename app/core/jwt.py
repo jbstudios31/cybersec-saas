@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from jose import JWTError, jwt
@@ -9,13 +9,13 @@ from app.core.config import JWT_ALGORITHM, JWT_AUDIENCE, JWT_EXPIRE_MINUTES, JWT
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
+    expire = datetime.now(UTC) + (
         expires_delta if expires_delta else timedelta(minutes=JWT_EXPIRE_MINUTES)
     )
     to_encode.update(
         {
             "exp": expire,
-            "iat": datetime.now(timezone.utc),
+            "iat": datetime.now(UTC),
             "jti": uuid.uuid4().hex,
             "iss": JWT_ISSUER,
             "aud": JWT_AUDIENCE,

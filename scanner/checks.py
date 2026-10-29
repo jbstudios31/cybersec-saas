@@ -8,6 +8,8 @@ from typing import Any
 
 import requests
 
+from app.core.ssrf import parse_target_url, resolve_public_ip, safe_session
+
 SECURITY_HEADERS = [
     "content-security-policy",
     "x-frame-options",
@@ -35,8 +37,20 @@ COMMON_PATHS = [
 
 def check_headers(url: str) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-    try:
-        resp = requests.get(url, timeout=10, verify=False, allow_redirects=False)
+    with safe_session() as session:
+        try:
+            resp = session.get(url, timeout=10, allow_redirects=False)
+        except requests.RequestException as exc:
+            findings.append(
+                {
+                    "severity": "high",
+                    "title": "Target unreachable",
+                    "description": f"Could not connect to {url}: {exc}",
+                    "remediation": "Verify the target URL is public and reachable.",
+                }
+            )
+            return findings
+
         present = {h.lower() for h in resp.headers.keys()}
         for header in SECURITY_HEADERS:
             if header not in present:
@@ -49,7 +63,6 @@ def check_headers(url: str) -> list[dict[str, Any]]:
                     }
                 )
 
-        # Cookies sin flags seguros
         set_cookie = resp.headers.get("set-cookie", "")
         if set_cookie:
             if "httponly" not in set_cookie.lower():
@@ -80,9 +93,8 @@ def check_headers(url: str) -> list[dict[str, Any]]:
                     }
                 )
 
-        # Métodos HTTP peligrosos
         try:
-            opts = requests.options(url, timeout=5, verify=False, allow_redirects=False)
+            opts = session.options(url, timeout=5, allow_redirects=False)
             allow = opts.headers.get("allow", "")
             dangerous = [m for m in ["PUT", "DELETE", "TRACE", "CONNECT"] if m in allow.upper()]
             if dangerous:
@@ -96,17 +108,57 @@ def check_headers(url: str) -> list[dict[str, Any]]:
                 )
         except requests.RequestException:
             pass
-
-    except requests.RequestException as exc:
-        findings.append(
-            {
-                "severity": "high",
-                "title": "Target unreachable",
-                "description": f"Could not connect to {url}: {exc}",
-                "remediation": "Verify the target URL is public and reachable.",
-            }
-        )
     return findings
+
+
+def _certificate_findings(hostname: str, ip: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    ctx = ssl.create_default_context()
+    with socket.create_connection((ip, 443), timeout=10) as sock:
+        with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+            cert = ssock.getpeercert()
+            not_after = cert.get("notAfter")
+            if not_after:
+                expiry = _dt.datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
+                days = (expiry - _dt.datetime.now(_dt.UTC).replace(tzinfo=None)).days
+                if days < 0:
+                    findings.append(
+                        {
+                            "severity": "critical",
+                            "title": "SSL certificate expired",
+                            "description": f"Certificate for {hostname} expired on {not_after}.",
+                            "remediation": "Renew the SSL/TLS certificate.",
+                        }
+                    )
+                elif days < 30:
+                    findings.append(
+                        {
+                            "severity": "high",
+                            "title": "SSL certificate expires soon",
+                            "description": f"Certificate for {hostname} expires in {days} days.",
+                            "remediation": "Renew the SSL/TLS certificate before expiration.",
+                        }
+                    )
+    return findings
+
+
+def _old_tls_version(hostname: str, ip: str) -> str | None:
+    """Devuelve la primera versión TLS obsoleta aceptada por el servidor, o None."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        for version in ["TLSv1", "TLSv1.1"]:
+            try:
+                ctx_old = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                ctx_old.check_hostname = False  # solo medimos el protocolo; la validez se mide arriba
+                ctx_old.verify_mode = ssl.CERT_NONE
+                ctx_old.minimum_version = ssl.TLSVersion.TLSv1
+                ctx_old.maximum_version = ssl.TLSVersion.TLSv1 if version == "TLSv1" else ssl.TLSVersion.TLSv1_1
+                with socket.create_connection((ip, 443), timeout=5) as sock:
+                    with ctx_old.wrap_socket(sock, server_hostname=hostname):
+                        return version
+            except (OSError, ssl.SSLError):
+                continue
+    return None
 
 
 def check_ssl(hostname: str) -> list[dict[str, Any]]:
@@ -114,54 +166,19 @@ def check_ssl(hostname: str) -> list[dict[str, Any]]:
     if not hostname:
         return findings
     try:
-        ctx = ssl.create_default_context()
-        with socket.create_connection((hostname, 443), timeout=10) as sock:
-            with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
-                cert = ssock.getpeercert()
-                not_after = cert.get("notAfter")
-                if not_after:
-                    expiry = _dt.datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
-                    days = (expiry - _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None)).days
-                    if days < 0:
-                        findings.append(
-                            {
-                                "severity": "critical",
-                                "title": "SSL certificate expired",
-                                "description": f"Certificate for {hostname} expired on {not_after}.",
-                                "remediation": "Renew the SSL/TLS certificate.",
-                            }
-                        )
-                    elif days < 30:
-                        findings.append(
-                            {
-                                "severity": "high",
-                                "title": "SSL certificate expires soon",
-                                "description": f"Certificate for {hostname} expires in {days} days.",
-                                "remediation": "Renew the SSL/TLS certificate before expiration.",
-                            }
-                        )
-
-        # Versiones de TLS soportadas (básico)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            for version in ["TLSv1", "TLSv1.1"]:
-                try:
-                    ctx_old = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                    ctx_old.minimum_version = ssl.TLSVersion.TLSv1
-                    ctx_old.maximum_version = ssl.TLSVersion.TLSv1 if version == "TLSv1" else ssl.TLSVersion.TLSv1_1
-                    with socket.create_connection((hostname, 443), timeout=5) as sock:
-                        with ctx_old.wrap_socket(sock, server_hostname=hostname):
-                            findings.append(
-                                {
-                                    "severity": "high",
-                                    "title": f"Insecure TLS version supported: {version}",
-                                    "description": f"The server supports {version}, which is deprecated.",
-                                    "remediation": f"Disable {version} and use TLS 1.2 or higher.",
-                                }
-                            )
-                            break
-                except Exception:
-                    continue
+        # Se resuelve y valida una vez; todas las conexiones TLS van a esa IP pública.
+        ip = resolve_public_ip(hostname, 443)
+        findings.extend(_certificate_findings(hostname, ip))
+        old = _old_tls_version(hostname, ip)
+        if old:
+            findings.append(
+                {
+                    "severity": "high",
+                    "title": f"Insecure TLS version supported: {old}",
+                    "description": f"The server supports {old}, which is deprecated.",
+                    "remediation": f"Disable {old} and use TLS 1.2 or higher.",
+                }
+            )
     except Exception:  # noqa: BLE001 - network errors are expected
         findings.append(
             {
@@ -177,9 +194,12 @@ def check_ssl(hostname: str) -> list[dict[str, Any]]:
 def check_common_paths(url: str) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     base = url.rstrip("/")
-    for path in COMMON_PATHS:
-        try:
-            resp = requests.get(base + path, timeout=5, verify=False, allow_redirects=False)
+    with safe_session() as session:
+        for path in COMMON_PATHS:
+            try:
+                resp = session.get(base + path, timeout=5, allow_redirects=False)
+            except requests.RequestException:
+                continue
             if resp.status_code in (200, 301, 302, 401, 403):
                 findings.append(
                     {
@@ -189,15 +209,13 @@ def check_common_paths(url: str) -> list[dict[str, Any]]:
                         "remediation": f"Restrict or remove {path} from public access.",
                     }
                 )
-        except requests.RequestException:
-            continue
     return findings
 
 
 def scan_target(url: str) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
+    _, hostname, _ = parse_target_url(url)
     findings.extend(check_headers(url))
-    hostname = url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
     findings.extend(check_ssl(hostname))
     findings.extend(check_common_paths(url))
     return findings
