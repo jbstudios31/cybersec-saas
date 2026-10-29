@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.env
+.env.*
+!.env.example
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Bases de datos locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Artefactos de despliegue
+backups/
+certs/
+prometheus_data/
+postgres_data/
+redis_data/
+*.log

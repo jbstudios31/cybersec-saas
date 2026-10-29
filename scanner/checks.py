@@ -1,0 +1,203 @@
+from __future__ import annotations
+
+import datetime as _dt
+import socket
+import ssl
+import warnings
+from typing import Any
+
+import requests
+
+SECURITY_HEADERS = [
+    "content-security-policy",
+    "x-frame-options",
+    "x-content-type-options",
+    "strict-transport-security",
+    "referrer-policy",
+    "permissions-policy",
+    "cross-origin-embedder-policy",
+    "cross-origin-opener-policy",
+    "cross-origin-resource-policy",
+]
+
+COMMON_PATHS = [
+    "/.env",
+    "/admin",
+    "/phpinfo.php",
+    "/.git/config",
+    "/wp-config.php",
+    "/server-status",
+    "/.htaccess",
+    "/config.json",
+    "/.svn/entries",
+]
+
+
+def check_headers(url: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    try:
+        resp = requests.get(url, timeout=10, verify=False, allow_redirects=False)
+        present = {h.lower() for h in resp.headers.keys()}
+        for header in SECURITY_HEADERS:
+            if header not in present:
+                findings.append(
+                    {
+                        "severity": "medium",
+                        "title": f"Missing security header: {header}",
+                        "description": f"The response does not include the {header} header.",
+                        "remediation": f"Configure the server to send {header}.",
+                    }
+                )
+
+        # Cookies sin flags seguros
+        set_cookie = resp.headers.get("set-cookie", "")
+        if set_cookie:
+            if "httponly" not in set_cookie.lower():
+                findings.append(
+                    {
+                        "severity": "medium",
+                        "title": "Cookie without HttpOnly flag",
+                        "description": "A session cookie was set without the HttpOnly flag.",
+                        "remediation": "Set HttpOnly on all session cookies.",
+                    }
+                )
+            if "secure" not in set_cookie.lower() and url.startswith("https://"):
+                findings.append(
+                    {
+                        "severity": "medium",
+                        "title": "Cookie without Secure flag over HTTPS",
+                        "description": "A session cookie was set without the Secure flag on an HTTPS site.",
+                        "remediation": "Set Secure on all cookies when serving over HTTPS.",
+                    }
+                )
+            if "samesite" not in set_cookie.lower():
+                findings.append(
+                    {
+                        "severity": "low",
+                        "title": "Cookie without SameSite attribute",
+                        "description": "A cookie was set without the SameSite attribute.",
+                        "remediation": "Set SameSite=Lax or Strict on cookies.",
+                    }
+                )
+
+        # Métodos HTTP peligrosos
+        try:
+            opts = requests.options(url, timeout=5, verify=False, allow_redirects=False)
+            allow = opts.headers.get("allow", "")
+            dangerous = [m for m in ["PUT", "DELETE", "TRACE", "CONNECT"] if m in allow.upper()]
+            if dangerous:
+                findings.append(
+                    {
+                        "severity": "medium",
+                        "title": f"Dangerous HTTP methods enabled: {', '.join(dangerous)}",
+                        "description": f"The server allows {', '.join(dangerous)} methods.",
+                        "remediation": "Disable unnecessary HTTP methods.",
+                    }
+                )
+        except requests.RequestException:
+            pass
+
+    except requests.RequestException as exc:
+        findings.append(
+            {
+                "severity": "high",
+                "title": "Target unreachable",
+                "description": f"Could not connect to {url}: {exc}",
+                "remediation": "Verify the target URL is public and reachable.",
+            }
+        )
+    return findings
+
+
+def check_ssl(hostname: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    if not hostname:
+        return findings
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((hostname, 443), timeout=10) as sock:
+            with ctx.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+                not_after = cert.get("notAfter")
+                if not_after:
+                    expiry = _dt.datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z")
+                    days = (expiry - _dt.datetime.now(_dt.timezone.utc).replace(tzinfo=None)).days
+                    if days < 0:
+                        findings.append(
+                            {
+                                "severity": "critical",
+                                "title": "SSL certificate expired",
+                                "description": f"Certificate for {hostname} expired on {not_after}.",
+                                "remediation": "Renew the SSL/TLS certificate.",
+                            }
+                        )
+                    elif days < 30:
+                        findings.append(
+                            {
+                                "severity": "high",
+                                "title": "SSL certificate expires soon",
+                                "description": f"Certificate for {hostname} expires in {days} days.",
+                                "remediation": "Renew the SSL/TLS certificate before expiration.",
+                            }
+                        )
+
+        # Versiones de TLS soportadas (básico)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            for version in ["TLSv1", "TLSv1.1"]:
+                try:
+                    ctx_old = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                    ctx_old.minimum_version = ssl.TLSVersion.TLSv1
+                    ctx_old.maximum_version = ssl.TLSVersion.TLSv1 if version == "TLSv1" else ssl.TLSVersion.TLSv1_1
+                    with socket.create_connection((hostname, 443), timeout=5) as sock:
+                        with ctx_old.wrap_socket(sock, server_hostname=hostname):
+                            findings.append(
+                                {
+                                    "severity": "high",
+                                    "title": f"Insecure TLS version supported: {version}",
+                                    "description": f"The server supports {version}, which is deprecated.",
+                                    "remediation": f"Disable {version} and use TLS 1.2 or higher.",
+                                }
+                            )
+                            break
+                except Exception:
+                    continue
+    except Exception:  # noqa: BLE001 - network errors are expected
+        findings.append(
+            {
+                "severity": "low",
+                "title": "SSL check unavailable",
+                "description": f"Could not retrieve certificate for {hostname}",
+                "remediation": "Ensure port 443 is reachable and a valid certificate is installed.",
+            }
+        )
+    return findings
+
+
+def check_common_paths(url: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    base = url.rstrip("/")
+    for path in COMMON_PATHS:
+        try:
+            resp = requests.get(base + path, timeout=5, verify=False, allow_redirects=False)
+            if resp.status_code in (200, 301, 302, 401, 403):
+                findings.append(
+                    {
+                        "severity": "medium",
+                        "title": f"Exposed path: {path}",
+                        "description": f"Path {path} responded with HTTP {resp.status_code}.",
+                        "remediation": f"Restrict or remove {path} from public access.",
+                    }
+                )
+        except requests.RequestException:
+            continue
+    return findings
+
+
+def scan_target(url: str) -> list[dict[str, Any]]:
+    findings: list[dict[str, Any]] = []
+    findings.extend(check_headers(url))
+    hostname = url.replace("https://", "").replace("http://", "").split("/")[0].split(":")[0]
+    findings.extend(check_ssl(hostname))
+    findings.extend(check_common_paths(url))
+    return findings

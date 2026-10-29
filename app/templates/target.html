@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ target.name }} · Cybersec SaaS{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <!-- Header -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <a href="/" class="text-sm text-blue-600 hover:underline mb-2 inline-flex items-center gap-1">
+        <span>←</span> Volver al panel
+      </a>
+      <h1 class="text-2xl font-bold text-gray-900">{{ target.name }}</h1>
+      <p class="text-gray-500">{{ target.url }}</p>
+    </div>
+    <div class="flex items-center gap-3">
+      {% if user %}
+      <form method="post" action="/targets/{{ target.id }}/scan-html" class="inline" onsubmit="return confirm('¿Ejecutar escaneo ahora? Esto puede tardar unos segundos.')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
+        <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+          Ejecutar escaneo
+        </button>
+      </form>
+      <a href="/targets/{{ target.id }}/report" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414a1 1 0 00-1.414 0l-5.414 5.414a1 1 0 00-.293.707V19a2 2 0 002 2z"></path></svg>
+        Descargar reporte PDF
+      </a>
+      {% else %}
+      <a href="/login" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Iniciar sesión</a>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if not user %}
+  <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+    <div class="flex items-start gap-3">
+      <svg class="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.542 2.98H4.42c-1.33 0-2.294-1.646-1.542-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0z" clip-rule="evenodd"></path></svg>
+      <div>
+        <h3 class="text-sm font-semibold text-yellow-800">Sesión requerida</h3>
+        <p class="text-sm text-yellow-700 mt-0.5">Inicia sesión para ejecutar escaneos y descargar reportes.</p>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <!-- Hallazgos -->
+  <div>
+    {% if target.scans %}
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Hallazgos de seguridad</h2>
+    <div class="space-y-4">
+      {% for scan in target.scans | reverse %}
+      <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+        <div class="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-mono text-gray-500">Scan #{{ scan.id }}</span>
+            <span class="text-xs px-2 py-0.5 rounded {% if scan.status=='done' %}bg-green-100 text-green-700{% else %}bg-gray-100 text-gray-600{% endif %}">{{ scan.status }}</span>
+          </div>
+          <span class="text-xs text-gray-400">{{ scan.started_at }}</span>
+        </div>
+        {% if scan.findings %}
+        <div class="p-4">
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {% for f in scan.findings %}
+            <div class="bg-white rounded-lg border border-gray-200 p-4 severity-{{ f.severity }}">
+              <div class="flex items-start justify-between mb-2">
+                <h3 class="font-semibold text-gray-900 text-sm">{{ f.title }}</h3>
+                <span class="text-xs font-bold px-2 py-0.5 rounded uppercase {% if f.severity=='critical' %}badge-critical{% elif f.severity=='high' %}badge-high{% elif f.severity=='medium' %}badge-medium{% else %}badge-low{% endif %}">{{ f.severity }}</span>
+              </div>
+              <p class="text-xs text-gray-600 mb-3">{{ f.description }}</p>
+              <div class="pt-2 border-t border-gray-100">
+                <p class="text-xs font-medium text-gray-700 mb-1">Corrección:</p>
+                <p class="text-xs text-gray-500">{{ f.remediation }}</p>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+        {% else %}
+        <div class="p-4 text-center text-gray-400 text-sm">Sin hallazgos en este escaneo.</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white p-8 rounded-lg shadow border border-gray-200 text-center">
+      <div class="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 mx-auto mb-4">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+      </div>
+      <h3 class="text-lg font-semibold text-gray-900 mb-2">Sin escaneos aún</h3>
+      <p class="text-gray-500 text-sm">Haz clic en "Ejecutar escaneo" para auditar este objetivo.</p>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

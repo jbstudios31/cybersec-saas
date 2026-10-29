@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Panel cliente · Cybersec SaaS{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <!-- Header -->
+  <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Panel cliente</h1>
+      <p class="text-gray-500">Gestiona tus objetivos de seguridad y revisa los hallazgos de los escaneos.</p>
+    </div>
+    <a href="/login" class="hidden md:block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors">Iniciar sesión</a>
+  </div>
+
+  {% if not user %}
+  <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+    <div class="flex items-start gap-3">
+      <svg class="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.542 2.98H4.42c-1.33 0-2.294-1.646-1.542-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0z" clip-rule="evenodd"></path></svg>
+      <div>
+        <h3 class="text-sm font-semibold text-yellow-800">Sesión requerida</h3>
+        <p class="text-sm text-yellow-700 mt-0.5">Inicia sesión para ver tus objetivos y ejecutar escaneos.</p>
+      </div>
+    </div>
+  </div>
+  {% else %}
+  <!-- Estadísticas -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Objetivos totales</p>
+      <p class="text-2xl font-bold text-gray-900">{{ stats.total_targets }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Hallazgos críticos</p>
+      <p class="text-2xl font-bold text-red-600">{{ stats.critical_findings }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Último escaneo</p>
+      <p class="text-2xl font-bold text-gray-900">{{ stats.last_scan or '—' }}</p>
+    </div>
+  </div>
+
+  <!-- Objetivos -->
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Tus objetivos</h2>
+    {% if targets %}
+    <div class="space-y-3">
+      {% for t in targets %}
+      <div class="bg-white p-4 rounded-lg shadow border border-gray-200 flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div>
+          <div class="font-semibold text-gray-900">{{ t.name }}</div>
+          <div class="text-sm text-gray-500 truncate max-w-md">{{ t.url }}</div>
+          <div class="text-xs text-gray-400 mt-1">ID: {{ t.id }} · Propietario: {{ t.owner_id }}</div>
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="/targets/{{ t.id }}" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm font-medium transition-colors">Ver hallazgos</a>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="bg-white p-8 rounded-lg shadow border border-gray-200 text-center">
+      <div class="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 mx-auto mb-4">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+      </div>
+      <h3 class="text-lg font-semibold text-gray-900 mb-2">No hay objetivos aún</h3>
+      <p class="text-gray-500 text-sm mb-4">Agrega un objetivo mediante la API para comenzar a escanear.</p>
+      <p class="text-xs text-gray-400">Ejemplo: <code class="bg-gray-100 px-1 py-0.5 rounded">POST /targets</code> con JSON <code class="bg-gray-100 px-1 py-0.5 rounded">{ "name": "...", "url": "...", "owner_id": 1 }</code></p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

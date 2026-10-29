@@ -1,0 +1,33 @@
+line-length = 120
+target-version = "py312"
+exclude = [".venv", ".pytest_cache", "alembic/versions"]
+
+[lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # bugbear
+    "UP",   # pyupgrade
+    "C4",   # comprehensions
+    "W",    # warnings
+]
+ignore = [
+    "E501",    # línea larga (manejado por line-length)
+    "B008",    # FastAPI Depends() en defaults
+    "B904",    # raise ... from en handlers: gestionado de forma explícita
+    "S101",    # assert permitido en tests
+    "UP006",   # tipado moderno ya usado en el proyecto
+    "UP007",
+    "UP035",
+    "UP045",
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["S", "B", "E402"]
+"alembic/*" = ["E402"]
+
+[lint.isort]
+known-first-party = ["app", "worker", "scanner", "tests", "alembic"]
+known-third-party = ["fastapi", "starlette", "sqlalchemy", "alembic", "celery", "jose", "requests", "reportlab", "pydantic", "prometheus_fastapi_instrumentator", "dotenv", "redis"]
+combine-as-imports = true

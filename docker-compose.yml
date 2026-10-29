@@ -1,0 +1,173 @@
+x-app-env: &app-env
+  ENV: ${ENV:-production}
+  SECRET_KEY: ${SECRET_KEY:?SECRET_KEY es obligatorio en producción}
+  CORS_ORIGINS: ${CORS_ORIGINS:-}
+  TRUSTED_HOSTS: ${TRUSTED_HOSTS:-}
+  DOCS_ENABLED: ${DOCS_ENABLED:-false}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  DATABASE_URL: ${DATABASE_URL:?DATABASE_URL es obligatorio}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+  DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+  DB_SSLMODE: ${DB_SSLMODE:-}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  SCAN_ASYNC: ${SCAN_ASYNC:-true}
+  CRON_TOKEN: ${CRON_TOKEN:-}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  SMTP_HOST: ${SMTP_HOST:-localhost}
+  SMTP_PORT: ${SMTP_PORT:-1025}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASS: ${SMTP_PASS:-}
+  SMTP_USE_TLS: ${SMTP_USE_TLS:-false}
+  ALERT_EMAIL: ${ALERT_EMAIL:-alerts@localhost}
+  ALERT_FROM_EMAIL: ${ALERT_FROM_EMAIL:-alerts@localhost}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cybersec
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cybersec}
+      POSTGRES_DB: cybersec
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cybersec -d cybersec"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    command: sh -c "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*' --workers ${WEB_CONCURRENCY:-1} --no-server-header"
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: celery -A worker.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - .env
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A worker.celery_app inspect ping -d celery@$$HOSTNAME || exit 1"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  beat:
+    build: .
+    restart: unless-stopped
+    command: celery -A worker.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    env_file:
+      - .env
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - app
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ./backups:/backups
+    environment:
+      PGHOST: postgres
+      PGUSER: cybersec
+      PGPASSWORD: ${POSTGRES_PASSWORD:-cybersec}
+      PGDATABASE: cybersec
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    entrypoint: ["/bin/sh", "-c", "while true; do /backup.sh; sleep ${BACKUP_INTERVAL:-86400}; done"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:

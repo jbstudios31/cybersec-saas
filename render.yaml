@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: cybersec-saas
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: oregon
+    healthCheckPath: /health
+    envVars:
+      - key: ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        value: redis://localhost:6379/0
+      - key: SCAN_ASYNC
+        value: "false"
+      - key: CRON_TOKEN
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false
+      - key: TRUSTED_HOSTS
+        sync: false
+      - key: DOCS_ENABLED
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        generateValue: true
+    preDeployCommand: alembic upgrade head

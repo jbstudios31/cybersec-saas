@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% block title %}Administrador · Cybersec SaaS{% endblock %}
+{% block content %}
+{% if not user or not user.is_admin %}
+<div class="bg-white p-8 rounded-lg shadow border border-gray-200 text-center">
+  <h2 class="text-lg font-semibold text-gray-900">Acceso restringido</h2>
+  <p class="text-gray-500 text-sm">Solo los administradores pueden ver este panel.</p>
+  <a href="/" class="mt-4 inline-block text-blue-600 hover:underline text-sm font-medium">Volver al panel cliente</a>
+</div>
+{% else %}
+<div class="space-y-6">
+  <!-- Header -->
+  <div>
+    <h1 class="text-2xl font-bold text-gray-900">Panel de administrador</h1>
+    <p class="text-gray-500">Supervisa todos los usuarios y objetivos de la plataforma.</p>
+  </div>
+
+  <!-- Estadísticas globales -->
+  <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Usuarios totales</p>
+      <p class="text-2xl font-bold text-gray-900">{{ stats.total_users }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Administradores</p>
+      <p class="text-2xl font-bold text-gray-900">{{ stats.total_admins }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Objetivos totales</p>
+      <p class="text-2xl font-bold text-gray-900">{{ stats.total_targets }}</p>
+    </div>
+    <div class="bg-white p-4 rounded-lg shadow border border-gray-200">
+      <p class="text-sm font-medium text-gray-500">Hallazgos críticos</p>
+      <p class="text-2xl font-bold text-red-600">{{ stats.total_critical_findings }}</p>
+    </div>
+  </div>
+
+  <!-- Usuarios -->
+  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+    <div class="bg-gray-50 px-4 py-3 border-b border-gray-200">
+      <h2 class="text-lg font-semibold text-gray-900">Usuarios ({{ users | length }})</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-xs font-medium text-gray-500 uppercase">Correo</th>
+            <th class="px-4 py-3 text-xs font-medium text-gray-500 uppercase">Rol</th>
+            <th class="px-4 py-3 text-xs font-medium text-gray-500 uppercase">Estado</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for u in users %}
+          <tr>
+            <td class="px-4 py-3 text-sm text-gray-900">{{ u.email }}</td>
+            <td class="px-4 py-3 text-sm">
+              <span class="px-2 py-1 rounded text-xs font-bold {% if u.is_admin %}bg-blue-100 text-blue-700{% else %}bg-gray-100 text-gray-600{% endif %}">
+                {% if u.is_admin %}ADMIN{% else %}Cliente{% endif %}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-sm">
+              <span class="px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-700">Activo</span>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="3" class="px-4 py-6 text-center text-gray-500">Sin usuarios registrados.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Todos los objetivos -->
+  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+    <div class="bg-gray-50 px-4 py-3 border-b border-gray-200">
+      <h2 class="text-lg font-semibold text-gray-900">Todos los objetivos ({{ targets | length }})</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-xs font-medium text-gray-500 uppercase">Nombre</th>
+            <th class="px-4 py-3 text-xs font-medium text-gray-500 uppercase">URL</th>
+            <th class="px-4 py-3 text-xs font-medium text-gray-500 uppercase">Propietario</th>
+            <th class="px-4 py-3 text-xs font-medium text-gray-500 uppercase">Estado</th>
+            <th class="px-4 py-3 text-xs font-medium text-gray-500 uppercase text-right">Acción</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for t in targets %}
+          <tr>
+            <td class="px-4 py-3 text-sm text-gray-900 font-medium">{{ t.name }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600 truncate max-w-xs">{{ t.url }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600">ID {{ t.owner_id }}</td>
+            <td class="px-4 py-3 text-sm">
+              <span class="px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-700">{{ 'Activo' if t.is_active else 'Inactivo' }}</span>
+            </td>
+            <td class="px-4 py-3 text-right">
+              <a href="/targets/{{ t.id }}" class="text-blue-600 hover:underline text-sm font-medium">Ver panel</a>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="5" class="px-4 py-6 text-center text-gray-500">Sin objetivos registrados.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+    <!-- Crear usuario -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+      <h2 class="text-lg font-semibold text-gray-900 mb-3">Crear usuario</h2>
+      <form method="post" action="/admin/users" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
+        <input name="email" type="email" required placeholder="correo" class="px-3 py-2 border rounded">
+        <input name="password" type="password" required placeholder="contraseña" class="px-3 py-2 border rounded">
+        <select name="is_admin" class="px-3 py-2 border rounded">
+          <option value="false">Cliente</option>
+          <option value="true">Admin</option>
+        </select>
+        <button class="bg-blue-600 text-white px-4 py-2 rounded">Crear</button>
+      </form>
+    </div>
+
+    <!-- Crear objetivo -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+      <h2 class="text-lg font-semibold text-gray-900 mb-3">Crear objetivo</h2>
+      <form method="post" action="/admin/targets" class="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token or '' }}">
+        <input name="name" required placeholder="nombre" class="px-3 py-2 border rounded">
+        <input name="url" required placeholder="https://..." class="px-3 py-2 border rounded">
+        <input name="owner_id" type="number" required placeholder="owner_id" class="px-3 py-2 border rounded">
+        <button class="bg-green-600 text-white px-4 py-2 rounded">Crear</button>
+      </form>
+    </div>
+  </div>
+{% endif %}
+{% endblock %}
